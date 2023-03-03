@@ -10,7 +10,11 @@ import requests
 from bs4 import BeautifulSoup
 import genanki
 
-LESSON_LINK = "https://www.50languages.com/phrasebook/lesson/{src}/{dest}/{lesson}"
+# TODO: Make original focus to translate from en to other languages.
+# TODO: Add the glpys to the note output.
+
+# https://www.50languages.com/em/learn/phrasebook-lessons/162/bn
+LESSON_LINK = "https://www.50languages.com/{src}/learn/phrasebook-lessons/{lesson}/{dest}"
 SOUND_LINK = "https://www.book2.nl/book2/{lang}/SOUND/{sound_id}.mp3"
 
 CSS = """\
@@ -29,6 +33,9 @@ SENTENCES_DIR = os.path.join(CACHE_DIR, "sentences")
 os.makedirs(AUDIO_DIR, exist_ok=True)
 os.makedirs(SENTENCES_DIR, exist_ok=True)
 
+LESSON_MAP = {
+    
+}
 
 def sentences_file_for_lang(lang: str) -> str:
     return os.path.join(SENTENCES_DIR, f"{lang}.json")
@@ -44,7 +51,7 @@ def create_sentences_file(lang: str) -> str:
 
 def get_cached_sentences(lang: str) -> Dict:
     path = create_sentences_file(lang)
-    with open(path) as f:
+    with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
@@ -80,6 +87,7 @@ def random_id() -> int:
 
 
 def get_model(src: str, dest: str, model_id: Optional[int] = None) -> genanki.Model:
+    # TODO: Format this to match some of your existing audio cards that you like. I think this is the audio recoginition that is below.
     return genanki.Model(
         model_id if model_id is not None else random_id(),
         f"50Languages {src}-{dest}",
@@ -143,6 +151,7 @@ def add_note(
             f"[sound:{filename2}]",
             lesson_link_html,
         ],
+        tags=["extracted-bengali", "lesson-title"], # TODO: Add tags for the notes about what it is i.e. 1=BN-People
         guid=genanki.guid_for(src, dest, sound_id),
         due=len(deck.notes),
     )
@@ -179,8 +188,8 @@ def generate_deck(
     while i <= end:
         sys.stdout.write(f"\rFetching lesson {i}...")
         sys.stdout.flush()
-
-        lesson_link = LESSON_LINK.format(src=src, dest=dest, lesson=i)
+        page_number = i+162    
+        lesson_link = LESSON_LINK.format(src=src, dest=dest, lesson=page_number)
         lesson_link_html = f'<a href="{lesson_link}">{lesson_link}</a>'
         sentences_1, sentences_2 = get_cached_lesson_sentences(src, dest, str(i))
         if sentences_1 and sentences_2:
@@ -210,10 +219,19 @@ def generate_deck(
                     for entry in sentence_entries:
                         cols = entry.select("td")
                         src_sentence = cols[0].get_text().strip()
+                        print(f"\n{src_sentence}")
                         if not src_sentence:
                             continue
-                        dest_sentence = str(cols[1].select("a")[1].contents[0])
-                        sound_id = cols[2].select("a")[0]["offset_text"]
+                        dest_sentence = str(cols[1].select("a")[3].contents[0]) # Get the english spelling of this.
+                        print(f"Language to Learn Sentence: {dest_sentence}")
+                        sound_id = cols[2].select("audio")[-1].contents[1]
+                        sound_id_str = str(sound_id)
+                        url_start_idx = sound_id_str.find('"')
+                        partial_str = sound_id_str[url_start_idx+1:]
+                        sound_id_str = partial_str[0:partial_str.find('"')]
+                        sound_id_str = sound_id_str.split("/")[-1].replace(".mp3","")
+                        print("sound_id: " + str(sound_id_str))
+                        sound_id = sound_id_str
                         filename2 = download_audio(session, dest, sound_id)
                         media_files.append(os.path.join(AUDIO_DIR, filename2))
                         add_note(
@@ -232,11 +250,11 @@ def generate_deck(
 
             except ConnectionResetError:
                 # FIXME: should we catch more exceptions here?
-                time.sleep(60)
+                time.sleep(15)
                 continue
             cache_lesson_sentences(src, str(i), sentences_1)
             cache_lesson_sentences(dest, str(i), sentences_2)
-            time.sleep(random.randrange(1, 30))
+            time.sleep(random.randrange(3, 5))
         i += 1
 
     package = genanki.Package(deck)
