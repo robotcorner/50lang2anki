@@ -10,9 +10,6 @@ import requests
 from bs4 import BeautifulSoup
 import genanki
 
-# TODO: Make original focus to translate from en to other languages.
-# TODO: Add the glpys to the note output.
-
 # https://www.50languages.com/em/learn/phrasebook-lessons/162/bn
 LESSON_LINK = "https://www.50languages.com/{src}/learn/phrasebook-lessons/{lesson}/{dest}"
 SOUND_LINK = "https://www.book2.nl/book2/{lang}/SOUND/{sound_id}.mp3"
@@ -155,14 +152,17 @@ def get_cached_sentences(lang: str) -> Dict:
 
 
 def get_cached_lesson_sentences(src: str, dest: str, lesson_id: str) -> Tuple:
+    dest_name_as_src_lang = f"{dest}_as_src_lang"
+    dest_name_as_orig_lang = f"{dest}_as_orig_lang"
     sentences_1 = get_cached_sentences(src).get(lesson_id, {})
-    sentences_2 = get_cached_sentences(dest).get(lesson_id, {})
-    return sentences_1, sentences_2
+    sentences_2 = get_cached_sentences(dest_name_as_src_lang).get(lesson_id, {})
+    sentences_3 = get_cached_sentences(dest_name_as_orig_lang).get(lesson_id, {})
+    return sentences_1, sentences_2, sentences_3
 
 
-def cache_lesson_sentences(lang: str, lesson_id: str, sentences: Dict):
-    path = sentences_file_for_lang(lang)
-    cached = get_cached_sentences(lang)
+def cache_lesson_sentences(name: str, lesson_id: str, sentences: Dict):
+    path = sentences_file_for_lang(name)
+    cached = get_cached_sentences(name)
     cached[lesson_id] = sentences
     with open(path, "w", encoding="utf-8") as f:
         json.dump(cached, f, ensure_ascii=False)
@@ -186,20 +186,21 @@ def random_id() -> int:
 
 
 def get_model(src: str, dest: str, model_id: Optional[int] = None) -> genanki.Model:
-    # TODO: Format this to match some of your existing audio cards that you like. I think this is the audio recoginition that is below.
     return genanki.Model(
         model_id if model_id is not None else random_id(),
         f"50Languages {src}-{dest}",
-        fields=[
-            {"name": src},
-            {"name": dest},
+        
+        fields = [
+            {"name": src},                   # source sentence
+            {"name": dest},                  # destination sentence in src language
+            {"name": f"{dest}_original"},    # destination sentence in original language
             {"name": f"{dest}_audio"},
             {"name": "Reference"},
         ],
         templates=[
             {
                 "name": f"{dest}-{src}",
-                "qfmt": "{{" + dest + "}}\n<br>\n" + "{{" + f"{dest}_audio" + "}}",
+                "qfmt": "{{" + f"{dest}_original" + "}}\n<br>\n" + "{{" + dest + "}}\n<br>\n" + "{{" + f"{dest}_audio" + "}}",
                 "afmt": "{{FrontSide}}\n<hr id=answer>\n"
                 + "{{"
                 + src
@@ -211,6 +212,9 @@ def get_model(src: str, dest: str, model_id: Optional[int] = None) -> genanki.Mo
                 "name": f"{src}-{dest}",
                 "qfmt": "{{" + src + "}}\n<br>",
                 "afmt": "{{FrontSide}}\n<hr id=answer>\n"
+                + "{{" 
+                + f"{dest}_original" 
+                + "}}\n<br>\n"
                 + "{{"
                 + dest
                 + "}}\n<br>\n"
@@ -220,12 +224,6 @@ def get_model(src: str, dest: str, model_id: Optional[int] = None) -> genanki.Mo
                 + "\n<br><br>\n"
                 + "{{Reference}}",
             },
-            # TODO: add audio recognition card type?
-            # {
-            #     "name": f"{dest} audio",
-            #     "qfmt": "{{" + f"{dest}_audio" + "}}",
-            #     "afmt": "{{FrontSide}}\n<hr id=answer>\n" + "{{" + dest + "}}",
-            # },
         ],
         css=CSS,
     )
@@ -238,7 +236,8 @@ def add_note(
     dest: str,
     sound_id: str,
     src_sentence: str,
-    dest_sentence: str,
+    dest_sentence_in_src_lang: str,
+    dest_sentence_in_orig_lang: str,
     filename2: str,
     lesson_link_html: str,
     note_tags: list,
@@ -247,7 +246,8 @@ def add_note(
         model=model,
         fields=[
             src_sentence,
-            dest_sentence,
+            dest_sentence_in_src_lang,
+            dest_sentence_in_orig_lang,
             f"[sound:{filename2}]",
             lesson_link_html,
         ],
@@ -273,7 +273,7 @@ def generate_deck(
     working directory.
     """
     deck_package_name = (
-        f"50Languages_{src}-{dest}_{start}-{end}.apkg" if not outfile else outfile
+        f"Language_{src}-{dest}_{start}-{end}.apkg" if not outfile else outfile
     )
     print(f"Generating {deck_package_name}...")
     model = get_model(src, dest, model_id)
@@ -291,12 +291,13 @@ def generate_deck(
         page_number = i+162    
         lesson_link = LESSON_LINK.format(src=src, dest=dest, lesson=page_number)
         lesson_link_html = f'<a href="{lesson_link}">{lesson_link}</a>'
-        sentences_1, sentences_2 = get_cached_lesson_sentences(src, dest, str(i))
+        sentences_1, sentences_2, sentences_3 = get_cached_lesson_sentences(src, dest, str(i))
         lesson_tag = LESSON_MAP.get(i).replace(" ", "-")
         note_tags = [f"{src}-to-{dest}", lesson_tag]
         if sentences_1 and sentences_2:
             for sound_id, src_sentence in sentences_1.items():
-                dest_sentence = sentences_2[sound_id]
+                dest_sentence_in_src_lang = sentences_2[sound_id]
+                dest_sentence_in_orig_lang = sentences_3[sound_id]
                 filename2 = download_audio(session, dest, sound_id)
                 media_files.append(os.path.join(AUDIO_DIR, filename2))
                 add_note(
@@ -306,7 +307,8 @@ def generate_deck(
                     dest,
                     sound_id,
                     src_sentence,
-                    dest_sentence,
+                    dest_sentence_in_src_lang,
+                    dest_sentence_in_orig_lang,
                     filename2,
                     lesson_link_html,
                     note_tags,
@@ -314,6 +316,7 @@ def generate_deck(
         else:
             sentences_1 = {}
             sentences_2 = {}
+            sentences_3 = {}
             # FIXME: handle exceptions?
             try:
                 with session.get(lesson_link) as res:
@@ -325,10 +328,9 @@ def generate_deck(
                         print(f"\n{src_sentence}")
                         if not src_sentence:
                             continue
-                        # grab the glyphs
-                        # dest_sentence = str(cols[1].select("a")[1].contents[0])
-                        dest_sentence = str(cols[1].select("a")[3].contents[0]) # Get the english spelling of this.
-                        print(f"Language to Learn Sentence: {dest_sentence}")
+                        dest_sentence_in_orig_lang = str(cols[1].select("a")[1].contents[0]) # Original Lanaguage spelling
+                        dest_sentence_in_src_lang = str(cols[1].select("a")[3].contents[0]) # Get the english spelling of this.
+                        print(f"Language to Learn Sentence: {dest_sentence_in_src_lang}")
                         # sound_id = cols[2].select_one("[offset_text]")["offset_text"]
                         sound_id = cols[2].select("audio")[-1].contents[1]
                         sound_id_str = str(sound_id)
@@ -347,20 +349,25 @@ def generate_deck(
                             dest,
                             sound_id,
                             src_sentence,
-                            dest_sentence,
+                            dest_sentence_in_src_lang,
+                            dest_sentence_in_orig_lang,
                             filename2,
                             lesson_link_html,
                             note_tags,
                         )
                         sentences_1[sound_id] = src_sentence
-                        sentences_2[sound_id] = dest_sentence
+                        sentences_2[sound_id] = dest_sentence_in_src_lang
+                        sentences_3[sound_id] = dest_sentence_in_orig_lang
 
             except ConnectionResetError:
                 # FIXME: should we catch more exceptions here?
                 time.sleep(15)
                 continue
+            dest_name_as_src_lang = f"{dest}_as_src_lang"
+            dest_name_as_orig_lang = f"{dest}_as_orig_lang"
             cache_lesson_sentences(src, str(i), sentences_1)
-            cache_lesson_sentences(dest, str(i), sentences_2)
+            cache_lesson_sentences(dest_name_as_src_lang, str(i), sentences_2)
+            cache_lesson_sentences(dest_name_as_orig_lang, str(i), sentences_3)
             time.sleep(random.randrange(3, 5))
         i += 1
 
