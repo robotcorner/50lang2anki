@@ -222,8 +222,11 @@ def generate_deck(
                         print(f"\n{src_sentence}")
                         if not src_sentence:
                             continue
+                        # grab the glyphs
+                        # dest_sentence = str(cols[1].select("a")[1].contents[0])
                         dest_sentence = str(cols[1].select("a")[3].contents[0]) # Get the english spelling of this.
                         print(f"Language to Learn Sentence: {dest_sentence}")
+                        # sound_id = cols[2].select_one("[offset_text]")["offset_text"]
                         sound_id = cols[2].select("audio")[-1].contents[1]
                         sound_id_str = str(sound_id)
                         url_start_idx = sound_id_str.find('"')
